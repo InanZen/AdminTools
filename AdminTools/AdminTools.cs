@@ -367,16 +367,19 @@ namespace AdminTools
                             }
                             var id = Sign.ReadSign(x, y);
                             var tplayer = TShock.Players[e.Msg.whoAmI];
-                            if (id != -1)
+                            if (tplayer != null && id != -1)
                             {
-                                QueryResult query = db.QueryReader("Select User,Time from SignData where X=@0 AND Y=@1 AND WorldID=@2", x, y, Main.worldID);
-                                tplayer.SendMessage(String.Format("Sign edit history:"), Color.LightSalmon);
-                                while (query.Read())
+                                if (tplayer.Group.HasPermission("AT.signhistory"))
                                 {
-                                    long time = query.Get<long>("Time");
-                                    tplayer.SendMessage(String.Format("{0} @ {1}", query.Get<string>("User"), new DateTime(time)), Color.BurlyWood);
+                                    QueryResult query = db.QueryReader("Select User,Time from SignData where X=@0 AND Y=@1 AND WorldID=@2", x, y, Main.worldID);
+                                    tplayer.SendMessage(String.Format("Sign edit history:"), Color.LightSalmon);
+                                    while (query.Read())
+                                    {
+                                        long time = query.Get<long>("Time");
+                                        tplayer.SendMessage(String.Format("{0} @ {1}", query.Get<string>("User"), new DateTime(time)), Color.BurlyWood);
+                                    }
+                                    query.Dispose();
                                 }
-                                query.Dispose();
                             }
                             // Console.WriteLine("x: {0} y: {1}", x, y);                            
                             break;
