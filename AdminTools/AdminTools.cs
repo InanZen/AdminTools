@@ -18,29 +18,17 @@ namespace AdminTools
 {
     public class ATPlayer
     {
-        public int UserID;
-        public String AccountName;
-        public List<String> IP;
-        public List<String> Nicknames;
-        public DateTime LastSeen;
-        public bool Online;
+        public int Index;
+        public int UserID = -1;
+        public String AccountName = "";
+        public List<String> IP = new List<string>();
+        public List<String> Nicknames = new List<string>();
+        public DateTime LastSeen = DateTime.Now;
+        public bool Online =  false;
         public List<BindTool> BindTools = new List<BindTool>();
-        public ATPlayer(int id, string name, List<string> nick, List<string> ip, DateTime lastseen)
+        public ATPlayer(int index)
         {
-            this.UserID = id;
-            this.AccountName = name;
-            this.IP = ip;
-            this.Nicknames = nick;
-            this.LastSeen = lastseen;
-            this.Online = false;
-        }
-        public ATPlayer(int id, string name, List<string> nick, List<string> ip)
-        {
-            this.UserID = id;
-            this.AccountName = name;
-            this.IP = ip;
-            this.Nicknames = nick;
-            this.Online = true; 
+            this.Index = index;
         }
         public void AddBindTool(BindTool NewBT)
         {
@@ -194,23 +182,22 @@ namespace AdminTools
         {
             try
             {
-                if (TShock.Players[who].UserID != -1)
+                var player = GetPlayerByIndex(who);
+                if (player != null)
                 {
-                    var player = GetPlayerByUserID(TShock.Players[who].UserID);
-                    if (player != null)
+                    if (player.UserID != -1)
                     {
                         AdminToolsMain.db.QueryReader("UPDATE PlayerData SET Nicknames=@1, IPs=@2, LastSeen=@3 WHERE UserID=@0", player.UserID, JsonConvert.SerializeObject(player.Nicknames, Formatting.None), JsonConvert.SerializeObject(player.IP, Formatting.None), DateTime.Now.Ticks);
-
-                        lock (PlayerList)
-                        {
-                            PlayerList.Remove(player);
-                        }
+                    }
+                    lock (PlayerList)
+                    {
+                        PlayerList.Remove(player);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log.ConsoleError(ex.Message);
+                Log.ConsoleError(ex.ToString());
             }
         }
         public void OnChat(messageBuffer buffer, int who, string text, System.ComponentModel.HandledEventArgs args)
@@ -235,7 +222,7 @@ namespace AdminTools
                         }
                         catch (Exception ex)
                         {
-                            Log.ConsoleError(ex.Message);
+                            Log.ConsoleError(ex.ToString());
                         }
                     }
                     LoginThread lt = new LoginThread(who);
@@ -260,6 +247,10 @@ namespace AdminTools
                         {
                             if (!TShock.Players[e.Msg.whoAmI].RequestedSection)
                             {
+                                lock (PlayerList)
+                                {
+                                    PlayerList.Add(new ATPlayer(e.Msg.whoAmI));
+                                }
                                 LoginThread lt = new LoginThread(e.Msg.whoAmI);
                                 Thread t = new Thread(new ThreadStart(lt.CheckLogin));
                                 t.Start();
@@ -348,7 +339,7 @@ namespace AdminTools
                                     }
                                 }
                                 catch (Exception ex)
-                                { Log.ConsoleError(ex.Message); }
+                                { Log.ConsoleError(ex.ToString()); }
                             }
                             break;
                         }
@@ -421,7 +412,7 @@ namespace AdminTools
                                     }
                                     catch (Exception ex)
                                     {
-                                        Log.ConsoleError(ex.Message);
+                                        Log.ConsoleError(ex.ToString());
                                     }
                                     //Console.WriteLine("Player {0} used item: {1}", player.TSPlayer.Name, Main.player[plyID].inventory[item].name);
                                 }
@@ -441,41 +432,110 @@ namespace AdminTools
         {
             if (args.Parameters.Count > 0)
             {
-                string name = String.Join(" ", args.Parameters);
-                var Results = GetPlayerByName(name);
+                bool exact = false;
+                bool userid = false;
+                bool ip = false;
+                string search;
+                if (args.Parameters[0][0] == '-' && args.Parameters.Count > 1)
+                {
+                    /*for (int i = 1; i < args.Parameters[0].Length; i++)
+                    {
+                    }*/
+                    if (args.Parameters[0].Length > 1)
+                    {
+                        switch (args.Parameters[0][1])
+                        {
+                            case 'e':
+                                {
+                                    exact = true;
+                                    search = String.Join(" ", args.Parameters.GetRange(1, args.Parameters.Count - 1));
+                                    break;
+                                }
+                            case 'u':
+                                {
+                                    userid = true;
+                                    search = args.Parameters[1];
+                                    break;
+                                }
+                            case 'i':
+                                {
+                                    ip = true;
+                                    search = args.Parameters[1];
+                                    break;
+                                }
+                            default:
+                                {
+                                    search = String.Join(" ", args.Parameters);
+                                    break;
+                                }
+                        }
+                    }
+                    else
+                        search = String.Join(" ", args.Parameters);
+                }
+                else
+                    search = String.Join(" ", args.Parameters);
+                List<ATPlayer> Results;
+                if (ip)
+                {
+                    Results = SearchPlayerByIP(args.Parameters[1]);
+                }
+                else if (userid)
+                {
+                    int id = 0;
+                    if (int.TryParse(args.Parameters[1], out id))
+                        Results = SearchPlayerByUserID(id);
+                    else
+                    {
+                        args.Player.SendMessage("Cannot parse Integer UserID", Color.Red);
+                        return;
+                    }
+                }
+                else
+                    Results = SearchPlayerByName(search, exact);
                 if (Results.Count > 6)
                 {
                     args.Player.SendMessage("More than 6 results found, please refine your search", Color.LightSalmon);
                 }
                 else if (Results.Count > 0)
                 {
-                    args.Player.SendMessage(String.Format("Listing matches ({0}):", Results.Count), Color.LightSalmon);
-                    foreach (ATPlayer player in Results)
+                    if (Results.Count == 1)
                     {
-                        args.Player.SendMessage(String.Format("({0}){1} ({2}) - Known as: {3} Last online: {4}", player.UserID,player.AccountName,player.IP[0], String.Join(",", player.Nicknames),(player.Online)?"Now":player.LastSeen.ToString()), Color.BurlyWood);
+                        if (ip)
+                            args.Player.SendMessage(String.Format("Details of IP search: {0}", search), Color.LightSalmon);
+                        else if (userid)
+                            args.Player.SendMessage(String.Format("Details of UserID search: {0}", search), Color.LightSalmon);
+                        else if (exact)
+                            args.Player.SendMessage(String.Format("Details of Exact name search: {0}", search), Color.LightSalmon);
+                        else        
+                            args.Player.SendMessage(String.Format("Details of search: {0}", search), Color.LightSalmon);
+                        args.Player.SendMessage(String.Format("UserID: {0}, Registered Name: {1}", Results[0].UserID, Results[0].AccountName), Color.BurlyWood);
+                        if (Results[0].Nicknames.Count > 0)
+                            args.Player.SendMessage(String.Format("Other Nicknames: {0}", String.Join(", ", Results[0].Nicknames)), Color.BurlyWood);
+                        args.Player.SendMessage(String.Format("IPs: {0}", String.Join(", ", Results[0].IP)), Color.BurlyWood);
+                        args.Player.SendMessage(String.Format("Last seen: {0}", (Results[0].Online) ? "Now" : Results[0].LastSeen.ToString()), Color.BurlyWood);
+                    }
+                    else
+                    {
+                        args.Player.SendMessage(String.Format("Listing matches ({0}):", Results.Count), Color.LightSalmon);
+                        foreach (ATPlayer player in Results)
+                        {
+                            args.Player.SendMessage(String.Format("({0}){1} (IPs({2}):{3}) - Known as: {4} Last online: {5}", player.UserID, player.AccountName, player.IP.Count, player.IP[0], String.Join(",", player.Nicknames), (player.Online) ? "Now" : player.LastSeen.ToString()), Color.BurlyWood);
+                        }
                     }
                 }
                 else
                 {
-                    args.Player.SendMessage(String.Format("Cannot find player '{0}'", name), Color.LightSalmon);
+                    args.Player.SendMessage(String.Format("Cannot find any reference to '{0}'", search), Color.LightSalmon);
                 }
                 return;
             }
-            args.Player.SendMessage("Syntax: /whois player name", Color.Red);
+            args.Player.SendMessage("Syntax: /whois [-eui] player name", Color.Red);
+            args.Player.SendMessage("Flags: ", Color.LightSalmon);
+            args.Player.SendMessage("-e  Exact name search", Color.LightSalmon);
+            args.Player.SendMessage("-u  UserID search", Color.LightSalmon);
+            args.Player.SendMessage("-i  IP address search", Color.LightSalmon);
         }
-        private static ATPlayer GetPlayerByID(int id)
-        {
-            int userid = -1;
-            if (TShock.Players[id] != null)
-                userid = TShock.Players[id].UserID; 
-            lock (PlayerList)
-            {
-                foreach (ATPlayer player in PlayerList)
-                    if (player.UserID == id)
-                        return player;
-            }
-            return null;
-        } 
         private static ATPlayer GetPlayerByUserID(int id)
         {
             lock (PlayerList)
@@ -486,42 +546,133 @@ namespace AdminTools
             }
             return null;
         }        
-        private static List<ATPlayer> GetPlayerByName(string name)
+        private static List<ATPlayer> SearchPlayerByName(string name, bool exact = false)
         {
             List<ATPlayer> ReturnList = new List<ATPlayer>();
             lock (PlayerList)
             {
                 foreach (ATPlayer player in PlayerList)
                 {
-                    if (player.AccountName.ToLower().StartsWith(name.ToLower()))
+                    if ((exact && player.AccountName == name) || (!exact && player.AccountName.ToLower().StartsWith(name.ToLower())))
                         ReturnList.Add(player);
                     else
                     {
                         foreach (string nick in player.Nicknames)
                         {
-                            if (nick.ToLower().StartsWith(name.ToLower()))
+                            if ((exact && nick == name) || (!exact && nick.ToLower().StartsWith(name.ToLower())))
                                 ReturnList.Add(player);
                         }
                     }
                 }
             }
-            QueryResult reader = AdminToolsMain.db.QueryReader("SELECT * from PlayerData WHERE Username LIKE '%" + name.ToLower() + "%' OR Nicknames LIKE '%" + name.ToLower() + "%'");
+            string query;
+            if (exact)
+                query = String.Format("SELECT * from PlayerData WHERE Username = '{0}' OR Nicknames LIKE '%\"{0}\"%'", name);
+            else
+                query = String.Format("SELECT * from PlayerData WHERE Username LIKE '%{0}%' OR Nicknames LIKE '%{0}%'", name.ToLower());             
+            QueryResult reader = AdminToolsMain.db.QueryReader(query);
             while (reader.Reader.Read())
             {
                 bool found = false;
                 foreach (ATPlayer ply in ReturnList)
                 {
-                    if (ply.AccountName.ToLower() == reader.Get<String>("Username").ToLower())
+                    if ((exact && ply.AccountName == reader.Get<String>("Username")) || (!exact && ply.AccountName.ToLower() == reader.Get<String>("Username").ToLower()))
                     {
                         found = true;
                         break;
                     }
                 }
                 if (!found)
-                    ReturnList.Add(new ATPlayer(reader.Get<int>("UserID"), reader.Get<String>("Username"), JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("Nicknames")), JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("IPs")), new DateTime(reader.Get<long>("LastSeen"))));
+                {
+                    ATPlayer newplayer = new ATPlayer(-1);
+                    newplayer.UserID = reader.Get<int>("UserID");
+                    newplayer.AccountName = reader.Get<String>("Username");
+                    newplayer.Nicknames = JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("Nicknames"));
+                    newplayer.IP = JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("IPs"));
+                    newplayer.LastSeen = new DateTime(reader.Get<long>("LastSeen"));
+                    ReturnList.Add(newplayer);
+             
+                }
             }
             return ReturnList;
         }
+        private static List<ATPlayer> SearchPlayerByUserID(int userid)
+        {
+            List<ATPlayer> ReturnList = new List<ATPlayer>();
+            lock (PlayerList)
+            {
+                foreach (ATPlayer player in PlayerList)
+                {
+                    if (player.UserID == userid)
+                        ReturnList.Add(player);
+                }
+            }
+            QueryResult reader = AdminToolsMain.db.QueryReader("SELECT * from PlayerData WHERE UserID = @0", userid);
+            while (reader.Reader.Read())
+            {
+                bool found = false;
+                foreach (ATPlayer ply in ReturnList)
+                {
+                    if (ply.UserID == reader.Get<int>("UserID"))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    ATPlayer newplayer = new ATPlayer(-1);
+                    newplayer.UserID = reader.Get<int>("UserID");
+                    newplayer.AccountName = reader.Get<String>("Username");
+                    newplayer.Nicknames = JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("Nicknames"));
+                    newplayer.IP = JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("IPs"));
+                    newplayer.LastSeen = new DateTime(reader.Get<long>("LastSeen"));
+                    ReturnList.Add(newplayer);
+                }
+            }
+            return ReturnList;
+        }
+        private static List<ATPlayer> SearchPlayerByIP(string ip)
+        {
+            List<ATPlayer> ReturnList = new List<ATPlayer>();
+            lock (PlayerList)
+            {
+                foreach (ATPlayer player in PlayerList)
+                {
+                    foreach (string i in player.IP)
+                    {
+                        if (i == ip)
+                            ReturnList.Add(player);
+                    }
+                }
+            }
+            string query = String.Format("SELECT * from PlayerData WHERE IPs LIKE '%\"{0}\"%'", ip);
+            QueryResult reader = AdminToolsMain.db.QueryReader(query);
+            while (reader.Reader.Read())
+            {
+                bool found = false;
+                foreach (ATPlayer ply in ReturnList)
+                {
+                    if (ply.UserID == reader.Get<int>("UserID"))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    ATPlayer newplayer = new ATPlayer(-1);
+                    newplayer.UserID = reader.Get<int>("UserID");
+                    newplayer.AccountName = reader.Get<String>("Username");
+                    newplayer.Nicknames = JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("Nicknames"));
+                    newplayer.IP = JsonConvert.DeserializeObject<List<String>>(reader.Get<String>("IPs"));
+                    newplayer.LastSeen = new DateTime(reader.Get<long>("LastSeen"));
+                    ReturnList.Add(newplayer);
+                }
+            }
+            return ReturnList;
+        }
+
 
         private static void BindToolCMD(CommandArgs args)
         {
@@ -587,6 +738,18 @@ namespace AdminTools
             args.Player.SendMessage("-l Will loop trough commands in order", Color.BurlyWood);
             args.Player.SendMessage("-c Will clear all commands from the item", Color.BurlyWood);
         }
+        public static ATPlayer GetPlayerByIndex(int index)
+        {
+            lock (PlayerList)
+            {
+                foreach (ATPlayer player in PlayerList)
+                {
+                    if (player.Index == index)
+                        return player;
+                }
+            }
+            return null;
+        }
     }
 
 
@@ -634,9 +797,17 @@ namespace AdminTools
                     {
                         Nicknames.Add(player.Name);
                     }
-                    lock (AdminToolsMain.PlayerList)
+                    ATPlayer atplayer = AdminToolsMain.GetPlayerByIndex(this.Index);
+                    if (atplayer != null)
                     {
-                        AdminToolsMain.PlayerList.Add(new ATPlayer(player.UserID, player.UserAccountName, Nicknames, IP));
+                        lock (AdminToolsMain.PlayerList)
+                        {
+                            atplayer.UserID = player.UserID;
+                            atplayer.AccountName = player.UserAccountName;
+                            atplayer.Nicknames = Nicknames;
+                            atplayer.IP = IP;
+                            atplayer.Online = true;
+                        }
                     }
 
                 }

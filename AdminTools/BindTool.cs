@@ -38,7 +38,7 @@ namespace AdminTools
                     }
                 }
             }
-            catch (Exception ex) { Log.ConsoleError(ex.Message); }
+            catch (Exception ex) { Log.ConsoleError(ex.ToString()); }
         }
     }  
 }
